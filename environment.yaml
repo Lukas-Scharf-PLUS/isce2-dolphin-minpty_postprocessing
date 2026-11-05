@@ -1,0 +1,28 @@
+# Conda environment for post-processing isce2-dolphin-mintpy runs into one point file.
+#
+# Create it with:  mamba env create -f environment.yaml
+#
+# Separate from the isce2-dolphin-mintpy environment on purpose: the export only
+# reads HDF5 and GeoTIFF files and needs none of ISCE2, dolphin or MintPy.
+name: mintpy-postprocessing
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy>=2
+  # Reads dolphin's quality rasters (similarity, PS mask, CRLB). Version 1.5 is
+  # the first that reads Float16 GeoTIFFs, which dolphin writes for some of them.
+  - rasterio>=1.5
+  # Reads MintPy's HDF5 files.
+  - h5py>=3.6
+  - pyproj>=3.6
+  - shapely>=2
+  # Writes the GeoParquet file.
+  - pyarrow>=17
+  # Reads the GeoParquet file in the tests and for your own analysis.
+  - geopandas>=1.0
+  # Reads the pipeline and dolphin configs for the metadata.
+  - pyyaml>=6
+
+  # Tests for this project.
+  - pytest

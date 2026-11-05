@@ -1,0 +1,21 @@
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Output data produced by the pipeline (can be large; regenerate instead)
+*.parquet
+
+# Editor / IDE settings
+.idea/
+.vscode/
+
+# Local Claude Code settings (machine-specific)
+.claude/
+
+# Secrets
+.env
+*.key
+*.pem
