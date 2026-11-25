@@ -34,6 +34,8 @@ from postprocessing.attributes import (
     MODEL,
     MODEL_COHERENCE,
     MODEL_COLUMNS,
+    SHIFT_COLUMNS,
+    SUBPIXEL,
     Attribute,
     displacement_column,
     displacement_std_column,
@@ -58,6 +60,12 @@ LOS_SOURCES = ("incidence_angle", "azimuth_angle")
 LOS_COLUMNS = ("los_east", "los_north", "los_up")
 # Not written as columns themselves (lat/lon become position columns).
 POSITION_LAYERS = ("lat", "lon")
+# Layers the sub-pixel shift is computed from (besides lat/lon).
+SHIFT_SOURCES = ("lat_subpixel", "lon_subpixel")
+
+# WGS84 ellipsoid, for converting small latitude/longitude differences to meters.
+WGS84_SEMI_MAJOR_AXIS_M = 6378137.0
+WGS84_ECCENTRICITY_SQUARED = 6.69437999014e-3
 
 
 class ExportError(RuntimeError):
@@ -120,12 +128,30 @@ def _crlb_usable(outputs: RunOutputs, reader: _LayerReader) -> bool:
     )
 
 
+def _without_unused_subpixel(selected: list[Attribute], layers: dict[str, Layer]) -> list[Attribute]:
+    """Drop the sub-pixel columns if the run has no sub-pixel output at all.
+
+    The subpixel step is optional and off by default, so its absence is normal
+    and not worth a warning. If only some of its files are missing, the usual
+    warning in ``_available_attributes`` names them.
+    """
+    subpixel_names = {attribute.name for attribute in selected if attribute.group == SUBPIXEL}
+    if not subpixel_names or subpixel_names & set(layers):
+        return selected
+    logger.info("No sub-pixel output (subpixel step not run); sub-pixel columns not written.")
+    return [attribute for attribute in selected if attribute.group != SUBPIXEL]
+
+
 def _available_attributes(selected: list[Attribute], layers: dict[str, Layer],
                           crlb_usable: bool) -> list[Attribute]:
     """Drop the selected columns whose sources are missing; warn about them."""
+    selected = _without_unused_subpixel(selected, layers)
+
     def is_available(attribute: Attribute) -> bool:
         if attribute.name in LOS_COLUMNS:
             return all(source in layers for source in LOS_SOURCES)
+        if attribute.name in SHIFT_COLUMNS:
+            return all(source in layers for source in SHIFT_SOURCES)
         if attribute.group == DISPLACEMENT_STD:
             return crlb_usable
         if attribute.group in (DISPLACEMENT, MODEL, MODEL_COHERENCE) or attribute.name in (
@@ -182,6 +208,36 @@ def los_unit_vector(incidence_deg: np.ndarray, azimuth_deg: np.ndarray):
     return (-np.sin(incidence) * np.sin(azimuth),
             np.sin(incidence) * np.cos(azimuth),
             np.cos(incidence))
+
+
+def shift_in_meters(lat_deg: np.ndarray, lon_deg: np.ndarray,
+                    target_lat_deg: np.ndarray, target_lon_deg: np.ndarray):
+    """Return the (east, north) distance in meters from one position to a nearby one.
+
+    Uses the WGS84 radii of curvature at ``lat_deg`` (meridian radius for north,
+    prime vertical radius for east). For shifts of a few meters the error of
+    this local approximation is far below a millimeter.
+
+    Parameters
+    ----------
+    lat_deg, lon_deg : np.ndarray
+        Start positions (pixel centers), degrees.
+    target_lat_deg, target_lon_deg : np.ndarray
+        End positions (sub-pixel positions), degrees. NaN gives NaN.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        Eastward and northward shift in meters.
+    """
+    lat = np.deg2rad(lat_deg)
+    denominator = 1.0 - WGS84_ECCENTRICITY_SQUARED * np.sin(lat) ** 2
+    meridian_radius = (WGS84_SEMI_MAJOR_AXIS_M * (1.0 - WGS84_ECCENTRICITY_SQUARED)
+                       / denominator ** 1.5)
+    prime_vertical_radius = WGS84_SEMI_MAJOR_AXIS_M / np.sqrt(denominator)
+    east = np.deg2rad(target_lon_deg - lon_deg) * prime_vertical_radius * np.cos(lat)
+    north = np.deg2rad(target_lat_deg - lat_deg) * meridian_radius
+    return east, north
 
 
 def _selected_pixels(block: dict[str, np.ndarray], all_pixels: bool) -> np.ndarray:
@@ -267,7 +323,8 @@ def export_points(
             writer = stack.enter_context(
                 pq.ParquetWriter(partial_file, schema, compression=PARQUET_COMPRESSION))
             needed_layers = {name for name in layers if name in names or name in POSITION_LAYERS
-                             or name in LOS_SOURCES or name == "mask_temporal_coherence"}
+                             or name in LOS_SOURCES or name == "mask_temporal_coherence"
+                             or (name in SHIFT_SOURCES and names & set(SHIFT_COLUMNS))}
             radians_to_mm = wavelength_m / (4 * math.pi) * MM_PER_M
             length, width = outputs.shape
 
@@ -289,6 +346,11 @@ def export_points(
                     east, north, up = los_unit_vector(columns["incidence_angle"],
                                                       columns["azimuth_angle"])
                     columns |= {"los_east": east, "los_north": north, "los_up": up}
+                if all(source in columns for source in SHIFT_SOURCES):
+                    shift_east, shift_north = shift_in_meters(
+                        columns["lat"], columns["lon"],
+                        columns["lat_subpixel"], columns["lon_subpixel"])
+                    columns |= {"shift_east": shift_east, "shift_north": shift_north}
 
                 displacement_mm = (reader.timeseries_rows(outputs.timeseries_file, first, last)
                                    [:, rows, cols].T * MM_PER_M)

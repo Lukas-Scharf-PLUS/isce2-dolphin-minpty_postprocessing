@@ -126,6 +126,7 @@ the point geometry are always written. Points are in WGS84 longitude/latitude
 | `mintpy_quality` | `temporal_coherence`, `avg_spatial_coherence`, `mask_temporal_coherence`, `conncomp_ok`, `num_inverted_ifgrams` | `temporalCoherence.h5`, `avgSpatialCoh.h5`, `maskTempCoh.h5`, `maskConnComp.h5`, `numInvIfgram.h5` |
 | `phase_linking` | `phase_linking_coherence`, `similarity`, `shp_count` | `dolphinTemporalCoherence.h5`, `dolphin/interferograms/` |
 | `persistent_scatterers` | `is_ps`, `amp_dispersion` | `dolphin/interferograms/ps_mask_looked.tif`, `amp_dispersion_looked.tif` |
+| `subpixel` | `lon_subpixel`, `lat_subpixel`, `height_subpixel`, `shift_east`, `shift_north`, `range_offset`, `azimuth_offset`, `range_offset_std`, `azimuth_offset_std`, `subpixel_valid_dates`, `subpixel_on_peak` | `subpixel/*.tif` (only if the pipeline's optional `subpixel` step ran; `shift_*` computed) |
 | `mintpy_velocity` | `velocity_mintpy`, `velocity_mintpy_std` (mm/year) | `velocity.h5` |
 | `dem_error` | `dem_error` (m) | `demErr.h5` (only with MintPy's topographic residual correction) |
 | `model` | `mean_velocity`, `mean_velocity_std`, `acceleration`, `acceleration_std`, `seasonality`, `seasonality_std`, `season_peak_doy`, `season_peak_doy_std`, `rmse` | fitted, see below |
@@ -147,7 +148,7 @@ Notes on some columns:
 - **`temporal_coherence`** is MintPy's network-inversion coherence. Phase-linked
   interferograms have almost no closure phase, so it is close to 1 nearly everywhere.
   `phase_linking_coherence`, dolphin's temporal coherence, is the more useful quality
-  measure. When the pipeline ran with `mintpy.inversion: dolphin`, both are dolphin's.
+  measure. When the pipeline ran with `inversion: dolphin`, both are dolphin's.
 - **`velocity_mintpy`** is MintPy's linear fit of the final time series. `mean_velocity`
   adds seasonal terms when the series spans more than a year, so the two differ slightly.
 - **`D<date>_std`** comes from dolphin's Cramér-Rao lower bound (CRLB) and covers phase
@@ -158,6 +159,17 @@ Notes on some columns:
   satellite. They follow MintPy's convention, where `azimuth_angle` is measured from
   north, anti-clockwise. A displacement `d` in east/north/up projects to the
   line of sight as `d_e·los_east + d_n·los_north + d_u·los_up`.
+- **Sub-pixel columns** are written only when the run has a `subpixel/` folder (pipeline
+  option `subpixel.enabled: true`); otherwise they are left out without a warning. They are
+  filled only for PS pixels and empty elsewhere. `lon`, `lat` and the point geometry always
+  stay the **pixel center**; `lon_subpixel`/`lat_subpixel` give the PS position inside the
+  resolution cell, on the DEM surface (`dem_error` is not applied). `shift_east` and
+  `shift_north` are the distance in meters from (`lon`, `lat`) to that position. The current
+  pipeline stores `lat`/`lon` as float64, so the shift is exact. Runs from older pipeline
+  versions stored float32 (about 0.4 m steps at 48°): there `lat`/`lon` and the shift have
+  up to about 0.2 m rounding error. Use `range_offset_std`/`azimuth_offset_std` to judge an
+  offset (large = several scatterers or noise), and keep `subpixel_on_peak = 1` for one
+  point per scatterer.
 
 ## Output file name and metadata
 

@@ -46,6 +46,7 @@ WATER = "water"
 MINTPY_QUALITY = "mintpy_quality"
 PHASE_LINKING = "phase_linking"
 PERSISTENT_SCATTERERS = "persistent_scatterers"
+SUBPIXEL = "subpixel"
 MINTPY_VELOCITY = "mintpy_velocity"
 DEM_ERROR = "dem_error"
 MODEL = "model"
@@ -103,6 +104,38 @@ FIXED_ATTRIBUTES = (
               "1 if at least one full-resolution PS pixel lies in this output pixel."),
     Attribute("amp_dispersion", PERSISTENT_SCATTERERS, pa.float32(), "",
               "Lowest amplitude dispersion in this output pixel. Lower is more PS-like."),
+    # Optional: only written when the pipeline's subpixel step ran (subpixel/ exists).
+    Attribute("lon_subpixel", SUBPIXEL, pa.float64(), "deg",
+              "Longitude (WGS84) of the PS at its sub-pixel position, on the DEM surface "
+              "(dem_error not applied). Empty where there is no PS."),
+    Attribute("lat_subpixel", SUBPIXEL, pa.float64(), "deg",
+              "Latitude (WGS84) of the PS at its sub-pixel position, on the DEM surface "
+              "(dem_error not applied). Empty where there is no PS."),
+    Attribute("height_subpixel", SUBPIXEL, pa.float32(), "m",
+              "DEM height above the WGS84 ellipsoid at the sub-pixel position."),
+    Attribute("shift_east", SUBPIXEL, pa.float32(), "m",
+              "Eastward shift from the pixel center (lon, lat) to the sub-pixel position. "
+              "Exact with float64 lat/lon (current pipeline); older runs stored float32, "
+              "~0.2 m rounding."),
+    Attribute("shift_north", SUBPIXEL, pa.float32(), "m",
+              "Northward shift from the pixel center (lon, lat) to the sub-pixel position. "
+              "Exact with float64 lat/lon (current pipeline); older runs stored float32, "
+              "~0.2 m rounding."),
+    Attribute("range_offset", SUBPIXEL, pa.float32(), "pixel",
+              "Sub-pixel offset in full-resolution range samples. Positive = farther from the sensor."),
+    Attribute("azimuth_offset", SUBPIXEL, pa.float32(), "pixel",
+              "Sub-pixel offset in full-resolution azimuth lines. Positive = later azimuth time."),
+    Attribute("range_offset_std", SUBPIXEL, pa.float32(), "pixel",
+              "Standard deviation of the per-date range offsets. Large = several scatterers or "
+              "noise; do not use the offset then."),
+    Attribute("azimuth_offset_std", SUBPIXEL, pa.float32(), "pixel",
+              "Standard deviation of the per-date azimuth offsets. Large = several scatterers or "
+              "noise; do not use the offset then."),
+    Attribute("subpixel_valid_dates", SUBPIXEL, pa.int16(), "",
+              "Number of dates used for the sub-pixel estimate."),
+    Attribute("subpixel_on_peak", SUBPIXEL, pa.int8(), "",
+              "1 = this PS pixel is the amplitude peak itself; 0 = it lies on the flank of a peak "
+              "in a neighbouring pixel (same scatterer). Keep 1 for one point per scatterer."),
     Attribute("velocity_mintpy", MINTPY_VELOCITY, pa.float32(), "mm/year",
               "MintPy's velocity: linear fit of the final, corrected time series."),
     Attribute("velocity_mintpy_std", MINTPY_VELOCITY, pa.float32(), "mm/year",
@@ -136,6 +169,8 @@ GROUPS = tuple(dict.fromkeys(
     + [DISPLACEMENT, DISPLACEMENT_STD]
 ))
 ALWAYS_WRITTEN = {POINT_ID}
+# Sub-pixel shift in meters, computed from the pixel center and the sub-pixel position.
+SHIFT_COLUMNS = ("shift_east", "shift_north")
 # Columns that need the time-series model fit.
 MODEL_COLUMNS = frozenset(
     attribute.name

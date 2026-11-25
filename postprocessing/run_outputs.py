@@ -7,6 +7,7 @@ A run directory (the pipeline's ``paths.work_dir``) looks like this::
     ├── logs/versions.json            software versions (newer pipeline versions)
     ├── isce/                         ISCE2 topsStack (SAFE_files.txt, reference/, baselines/)
     ├── dolphin/                      dolphin work directory (interferograms/, dolphin.log)
+    ├── subpixel/                     optional: sub-pixel PS positions (pipeline step "subpixel")
     └── mintpy/                       MintPy work directory, radar coordinates
         ├── inputs/geometryRadar.h5   lat, lon, height, angles, shadow and water layers
         ├── timeseries*.h5            time series; the corrected ones add suffixes
@@ -40,6 +41,19 @@ CRLB_PATTERN = re.compile(r"crlb_(?P<date>\d{8})")
 MINTPY_DIRECTORY = "mintpy"
 DOLPHIN_DIRECTORY = "dolphin"
 INTERFEROGRAM_DIRECTORY = "interferograms"
+SUBPIXEL_DIRECTORY = "subpixel"
+# Column name -> GeoTIFF written by the pipeline's subpixel step (on dolphin's output grid).
+SUBPIXEL_FILES = {
+    "lon_subpixel": "longitude.tif",
+    "lat_subpixel": "latitude.tif",
+    "height_subpixel": "height.tif",
+    "range_offset": "range_offset.tif",
+    "azimuth_offset": "azimuth_offset.tif",
+    "range_offset_std": "range_offset_std.tif",
+    "azimuth_offset_std": "azimuth_offset_std.tif",
+    "subpixel_valid_dates": "valid_dates.tif",
+    "subpixel_on_peak": "on_peak.tif",
+}
 TIMESERIES_PREFIX = "timeseries"
 # MintPy files starting with "timeseries" that are not displacement time series.
 NOT_TIMESERIES_PREFIXES = ("timeseriesResidual", "timeseriesStd")
@@ -287,6 +301,9 @@ def find_run_outputs(run_dir: Path, timeseries_file: Path | None = None) -> RunO
         "is_ps": _tif_layer(interferogram_dir / "ps_mask_looked.tif"),
         "amp_dispersion": _tif_layer(interferogram_dir / "amp_dispersion_looked.tif"),
     }
+    subpixel_dir = run_dir / SUBPIXEL_DIRECTORY
+    candidates |= {name: _tif_layer(subpixel_dir / file_name)
+                   for name, file_name in SUBPIXEL_FILES.items()}
     for required in ("lat", "lon"):
         if candidates[required] is None:
             raise RunOutputError(f"{geometry} has no latitude/longitude.")
