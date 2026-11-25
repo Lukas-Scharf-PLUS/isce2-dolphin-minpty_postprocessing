@@ -121,6 +121,10 @@ FIXED_ATTRIBUTES = (
               "Northward shift from the pixel center (lon, lat) to the sub-pixel position. "
               "Exact with float64 lat/lon (current pipeline); older runs stored float32, "
               "~0.2 m rounding."),
+    Attribute("dem_error_subpixel", SUBPIXEL, pa.float32(), "m",
+              "dem_error re-referenced to the sub-pixel position: dem_error - range_offset * "
+              "full-resolution slant-range spacing * cos(incidence_angle). Add this, not dem_error, "
+              "to height_subpixel; adding dem_error would count the range offset twice."),
     Attribute("range_offset", SUBPIXEL, pa.float32(), "pixel",
               "Sub-pixel offset in full-resolution range samples. Positive = farther from the sensor."),
     Attribute("azimuth_offset", SUBPIXEL, pa.float32(), "pixel",
@@ -171,6 +175,8 @@ GROUPS = tuple(dict.fromkeys(
 ALWAYS_WRITTEN = {POINT_ID}
 # Sub-pixel shift in meters, computed from the pixel center and the sub-pixel position.
 SHIFT_COLUMNS = ("shift_east", "shift_north")
+# DEM error at the sub-pixel position, computed from dem_error, range_offset and incidence_angle.
+DEM_ERROR_SUBPIXEL = "dem_error_subpixel"
 # Columns that need the time-series model fit.
 MODEL_COLUMNS = frozenset(
     attribute.name

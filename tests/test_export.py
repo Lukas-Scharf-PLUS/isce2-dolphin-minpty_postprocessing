@@ -7,6 +7,7 @@ import pytest
 from conftest import VELOCITY_M_PER_YEAR
 from postprocessing.export import (
     ExportError,
+    dem_error_at_subpixel,
     export_points,
     los_unit_vector,
     shift_in_meters,
@@ -145,3 +146,41 @@ def test_shift_in_meters_matches_known_distances():
     # At 48.2 deg: 1 deg latitude ~ 111.2 km, 1 deg longitude ~ 74.3 km.
     assert north[0] == pytest.approx(1.1120, abs=0.001)
     assert east[0] == pytest.approx(0.7429, abs=0.001)
+
+
+@pytest.mark.parametrize("range_looks, expected_spacing", [(None, 9.3), ("4", 9.3 / 4)])
+def test_dem_error_subpixel_removes_the_range_offset_part(run_dir, tmp_path, range_looks,
+                                                          expected_spacing):
+    from conftest import write_h5
+    import h5py
+
+    _add_subpixel_output(run_dir)
+    write_h5(run_dir / "mintpy" / "demErr.h5", {"dem": np.full((6, 5), 2.5, dtype=np.float32)})
+    if range_looks is not None:
+        # RANGE_PIXEL_SIZE is the output grid spacing; with strides it is RLOOKS x full resolution.
+        with h5py.File(run_dir / "mintpy" / "timeseries.h5", "a") as timeseries:
+            timeseries.attrs["RLOOKS"] = range_looks
+    output = tmp_path / "out.parquet"
+    export_points(find_run_outputs(run_dir), output, WAVELENGTH)
+    points = gpd.read_parquet(output)
+
+    ps = points[(points["row"] == 2) & (points["col"] == 3)].iloc[0]
+    # range_offset 0.3 samples, incidence 35 degrees (see _add_subpixel_output and conftest)
+    expected = 2.5 - 0.3 * expected_spacing * np.cos(np.deg2rad(35.0))
+    assert ps["dem_error_subpixel"] == pytest.approx(expected, abs=1e-5)
+    assert ps["dem_error"] == pytest.approx(2.5)
+    others = points[~((points["row"] == 2) & (points["col"] == 3))]
+    assert others["dem_error_subpixel"].isna().all()
+
+
+def test_dem_error_subpixel_needs_mintpys_dem_error(run_dir, tmp_path):
+    _add_subpixel_output(run_dir)
+    output = tmp_path / "out.parquet"
+    export_points(find_run_outputs(run_dir), output, WAVELENGTH)
+    columns = set(gpd.read_parquet(output).columns)
+    assert "shift_east" in columns and "dem_error_subpixel" not in columns
+
+
+def test_dem_error_at_subpixel_formula():
+    result = dem_error_at_subpixel(np.array([1.0]), np.array([-0.5]), np.array([60.0]), 2.33)
+    assert result[0] == pytest.approx(1.0 + 0.5 * 2.33 * 0.5)

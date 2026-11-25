@@ -33,6 +33,7 @@ from postprocessing.attributes import (
     DISPLACEMENT_STD,
     MODEL,
     MODEL_COHERENCE,
+    DEM_ERROR_SUBPIXEL,
     MODEL_COLUMNS,
     SHIFT_COLUMNS,
     SUBPIXEL,
@@ -62,6 +63,8 @@ LOS_COLUMNS = ("los_east", "los_north", "los_up")
 POSITION_LAYERS = ("lat", "lon")
 # Layers the sub-pixel shift is computed from (besides lat/lon).
 SHIFT_SOURCES = ("lat_subpixel", "lon_subpixel")
+# Layers dem_error_subpixel is computed from (plus the full-resolution range spacing).
+DEM_ERROR_SUBPIXEL_SOURCES = ("dem_error", "range_offset", "incidence_angle")
 
 # WGS84 ellipsoid, for converting small latitude/longitude differences to meters.
 WGS84_SEMI_MAJOR_AXIS_M = 6378137.0
@@ -143,7 +146,7 @@ def _without_unused_subpixel(selected: list[Attribute], layers: dict[str, Layer]
 
 
 def _available_attributes(selected: list[Attribute], layers: dict[str, Layer],
-                          crlb_usable: bool) -> list[Attribute]:
+                          crlb_usable: bool, range_spacing_known: bool) -> list[Attribute]:
     """Drop the selected columns whose sources are missing; warn about them."""
     selected = _without_unused_subpixel(selected, layers)
 
@@ -152,6 +155,9 @@ def _available_attributes(selected: list[Attribute], layers: dict[str, Layer],
             return all(source in layers for source in LOS_SOURCES)
         if attribute.name in SHIFT_COLUMNS:
             return all(source in layers for source in SHIFT_SOURCES)
+        if attribute.name == DEM_ERROR_SUBPIXEL:
+            return range_spacing_known and all(
+                source in layers for source in DEM_ERROR_SUBPIXEL_SOURCES)
         if attribute.group == DISPLACEMENT_STD:
             return crlb_usable
         if attribute.group in (DISPLACEMENT, MODEL, MODEL_COHERENCE) or attribute.name in (
@@ -240,6 +246,37 @@ def shift_in_meters(lat_deg: np.ndarray, lon_deg: np.ndarray,
     return east, north
 
 
+def dem_error_at_subpixel(dem_error_m: np.ndarray, range_offset_samples: np.ndarray,
+                          incidence_deg: np.ndarray, range_spacing_m: float) -> np.ndarray:
+    """Re-reference MintPy's DEM error from the pixel center to the sub-pixel position.
+
+    ISCE2 flattened the phase at the pixel center on the DEM, so ``dem_error``
+    refers to that point. Moving along the DEM by the slant-range offset ``dr``
+    already shifts the point at right angles to the line of sight by the
+    equivalent of ``dr * cos(incidence)`` of height; that part is removed here,
+    so the result can be added to the sub-pixel DEM height without counting it
+    twice (see the pipeline's subpixel.py, after Yang et al. 2020).
+
+    Parameters
+    ----------
+    dem_error_m : np.ndarray
+        MintPy's DEM error in meters.
+    range_offset_samples : np.ndarray
+        Sub-pixel range offset in full-resolution samples (positive = farther).
+    incidence_deg : np.ndarray
+        Incidence angle in degrees.
+    range_spacing_m : float
+        Full-resolution slant-range sample spacing in meters.
+
+    Returns
+    -------
+    np.ndarray
+        DEM error at the sub-pixel position in meters (NaN where any input is NaN).
+    """
+    range_offset_m = range_offset_samples * range_spacing_m
+    return dem_error_m - range_offset_m * np.cos(np.deg2rad(incidence_deg))
+
+
 def _selected_pixels(block: dict[str, np.ndarray], all_pixels: bool) -> np.ndarray:
     """Boolean mask of the pixels to write in one block of rows.
 
@@ -312,7 +349,8 @@ def export_points(
                     "MintPy's mask (maskTempCoh.h5) is missing. Use --all-pixels to "
                     "write every pixel without it.")
             attributes = _available_attributes(
-                select_attributes(outputs.dates, excluded), layers, _crlb_usable(outputs, reader))
+                select_attributes(outputs.dates, excluded), layers, _crlb_usable(outputs, reader),
+                range_spacing_known=outputs.full_range_pixel_size_m is not None)
             names = {attribute.name for attribute in attributes}
             seasonal = seasonal_terms_supported(outputs.dates)
             if names & MODEL_COLUMNS and not seasonal:
@@ -324,7 +362,8 @@ def export_points(
                 pq.ParquetWriter(partial_file, schema, compression=PARQUET_COMPRESSION))
             needed_layers = {name for name in layers if name in names or name in POSITION_LAYERS
                              or name in LOS_SOURCES or name == "mask_temporal_coherence"
-                             or (name in SHIFT_SOURCES and names & set(SHIFT_COLUMNS))}
+                             or (name in SHIFT_SOURCES and names & set(SHIFT_COLUMNS))
+                             or (name in DEM_ERROR_SUBPIXEL_SOURCES and DEM_ERROR_SUBPIXEL in names)}
             radians_to_mm = wavelength_m / (4 * math.pi) * MM_PER_M
             length, width = outputs.shape
 
@@ -351,6 +390,10 @@ def export_points(
                         columns["lat"], columns["lon"],
                         columns["lat_subpixel"], columns["lon_subpixel"])
                     columns |= {"shift_east": shift_east, "shift_north": shift_north}
+                if DEM_ERROR_SUBPIXEL in names:
+                    columns[DEM_ERROR_SUBPIXEL] = dem_error_at_subpixel(
+                        columns["dem_error"], columns["range_offset"],
+                        columns["incidence_angle"], outputs.full_range_pixel_size_m)
 
                 displacement_mm = (reader.timeseries_rows(outputs.timeseries_file, first, last)
                                    [:, rows, cols].T * MM_PER_M)

@@ -103,6 +103,9 @@ class RunOutputs:
         Optional single-layer sources, by column name (see export.py).
     crlb_files : dict[datetime.date, Path]
         dolphin's per-date CRLB rasters; may be empty.
+    full_range_pixel_size_m : float or None
+        Slant-range spacing of the full-resolution SLC samples in meters, i.e.
+        the unit of the sub-pixel ``range_offset``. None if unknown.
     """
 
     run_dir: Path
@@ -112,6 +115,7 @@ class RunOutputs:
     shape: tuple[int, int]
     layers: dict[str, Layer] = field(default_factory=dict)
     crlb_files: dict[datetime.date, Path] = field(default_factory=dict)
+    full_range_pixel_size_m: float | None = None
 
     @property
     def mintpy_dir(self) -> Path:
@@ -163,6 +167,22 @@ def find_final_timeseries(mintpy_dir: Path) -> Path:
             "Choose one with --timeseries-file."
         )
     return final
+
+
+def read_full_range_pixel_size(timeseries_file: Path) -> float | None:
+    """Return the full-resolution slant-range sample spacing in meters, or None.
+
+    MintPy's ``RANGE_PIXEL_SIZE`` is the spacing of the output grid. The pipeline
+    sets it to the full-resolution spacing times dolphin's range stride, which it
+    stores as ``RLOOKS`` (1 if missing), so the full-resolution spacing is their
+    ratio.
+    """
+    with h5py.File(timeseries_file, "r") as h5_file:
+        pixel_size = h5_file.attrs.get("RANGE_PIXEL_SIZE")
+        range_looks = h5_file.attrs.get("RLOOKS", 1)
+    if pixel_size is None:
+        return None
+    return float(_text(pixel_size)) / float(_text(range_looks))
 
 
 def read_timeseries_dates(timeseries_file: Path) -> tuple[list[datetime.date], datetime.date, tuple]:
@@ -317,4 +337,5 @@ def find_run_outputs(run_dir: Path, timeseries_file: Path | None = None) -> RunO
         shape=shape,
         layers=layers,
         crlb_files=find_crlb_files(interferogram_dir) if interferogram_dir.is_dir() else {},
+        full_range_pixel_size_m=read_full_range_pixel_size(timeseries_file),
     )

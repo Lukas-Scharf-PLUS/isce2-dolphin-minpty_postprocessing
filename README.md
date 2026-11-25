@@ -126,7 +126,7 @@ the point geometry are always written. Points are in WGS84 longitude/latitude
 | `mintpy_quality` | `temporal_coherence`, `avg_spatial_coherence`, `mask_temporal_coherence`, `conncomp_ok`, `num_inverted_ifgrams` | `temporalCoherence.h5`, `avgSpatialCoh.h5`, `maskTempCoh.h5`, `maskConnComp.h5`, `numInvIfgram.h5` |
 | `phase_linking` | `phase_linking_coherence`, `similarity`, `shp_count` | `dolphinTemporalCoherence.h5`, `dolphin/interferograms/` |
 | `persistent_scatterers` | `is_ps`, `amp_dispersion` | `dolphin/interferograms/ps_mask_looked.tif`, `amp_dispersion_looked.tif` |
-| `subpixel` | `lon_subpixel`, `lat_subpixel`, `height_subpixel`, `shift_east`, `shift_north`, `range_offset`, `azimuth_offset`, `range_offset_std`, `azimuth_offset_std`, `subpixel_valid_dates`, `subpixel_on_peak` | `subpixel/*.tif` (only if the pipeline's optional `subpixel` step ran; `shift_*` computed) |
+| `subpixel` | `lon_subpixel`, `lat_subpixel`, `height_subpixel`, `shift_east`, `shift_north`, `dem_error_subpixel`, `range_offset`, `azimuth_offset`, `range_offset_std`, `azimuth_offset_std`, `subpixel_valid_dates`, `subpixel_on_peak` | `subpixel/*.tif` (only if the pipeline's optional `subpixel` step ran; `shift_*` and `dem_error_subpixel` computed) |
 | `mintpy_velocity` | `velocity_mintpy`, `velocity_mintpy_std` (mm/year) | `velocity.h5` |
 | `dem_error` | `dem_error` (m) | `demErr.h5` (only with MintPy's topographic residual correction) |
 | `model` | `mean_velocity`, `mean_velocity_std`, `acceleration`, `acceleration_std`, `seasonality`, `seasonality_std`, `season_peak_doy`, `season_peak_doy_std`, `rmse` | fitted, see below |
@@ -170,6 +170,14 @@ Notes on some columns:
   up to about 0.2 m rounding error. Use `range_offset_std`/`azimuth_offset_std` to judge an
   offset (large = several scatterers or noise), and keep `subpixel_on_peak = 1` for one
   point per scatterer.
+- **`dem_error_subpixel`** is MintPy's `dem_error` moved from the pixel center to the
+  sub-pixel position: `dem_error - range_offset · Δr · cos(incidence_angle)`, with `Δr` the
+  full-resolution slant-range spacing (`RANGE_PIXEL_SIZE / RLOOKS` of the time series). ISCE2
+  flattened the phase at the pixel center, so moving along the DEM by the range offset is
+  already part of `dem_error`; adding `dem_error` to the sub-pixel position would count it
+  twice (see the pipeline's README, after Yang et al. 2020). Use
+  `height_subpixel + dem_error_subpixel` for the scatterer height. Written only when MintPy
+  estimated the DEM error (`mintpy.topographicResidual`) and the subpixel step ran.
 
 ## Output file name and metadata
 
